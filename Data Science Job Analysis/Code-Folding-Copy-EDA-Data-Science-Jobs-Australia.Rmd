@@ -1,0 +1,556 @@
+---
+title: "Data Science Jobs in Australia - EDA"
+author: "Evan Guo"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+---
+
+<style type="text/css">
+  body{
+  font-family : times, serif;
+  font-size : 14pt;
+}
+</style>
+
+```{r setup, warning=FALSE,include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,fig.width = 8,fig.height = 6)
+```
+
+<h1 id="top10">Table of Contents</h1>
+
+<ol type="1">
+<li><a href="#top11">Objective</a></li> 
+<li><a href="#top1">Exploratory Data Analysis</a></li>
+<ol type="a">
+<li><a href="#top6">Most Common Words in Data Science Job Ads</a></li>
+<li><a href="#top7">Which programming languages (and tools) are most in-demand for Data Scientist roles in Australia?</a></li>
+<li><a href="#top8">What kind of salaries are Data Scientists earning in Australia?</a></li>
+<li><a href="#top9">How many Data Scientist jobs were listed in australia, how did it compare to a year ago (pre COVID in Australia), do salaries differs by geographical area and where are these jobs located?</a></li>
+<li><a href="#top12">How many Data Science Related Roles offered by companies in Australia?</a></li>
+</ol>
+<li><a href="#top2">Conclusion</a></li>
+<li><a href="#top3">References</a></li>
+</ol>
+
+
+<h1 id="top11"><u>Objective</u></h1>
+<b> It's certainly something that seems to be on people's minds lately.</b> Everyone is talking about it, a lot are claiming to do it, and increasingly, more people are hiring for it. 
+
+<b> But what is it? </b>
+
+Data science, in its most basic terms, can be defined as obtaining insights and information, really anything of value, out of data. In reality, data science is evolving so fast and has already shown such enormous range of possibility that a wider definition is essential to understanding it.
+
+So here we'll do data analysis to answer some interesting questions related to data science that you've always wanted to know like- 
+
+<li> <b> How many Data Scientist jobs were listed in australia, how did it compare to a year ago (pre COVID in Australia), and where are these jobs located? </b></li>
+
+<li> <b>Which programming languages (and tools) are most in-demand for Data Scientist roles in Australia? </b></li>
+
+<li> <b> What kind of salaries are Data Scientists earning in Australia, do salaries differ by language and geographic area, and have they changed at all in the past year? </b></li>
+
+So, let's get started.
+Here, we will use the dataset which comprises every australian data science job listing for a year!
+
+### Let's Import the required libraries to start the analysis.
+
+```{r warning=FALSE,message=FALSE}
+
+library(readr)
+library(rmarkdown)
+library(prettydoc)
+library(DT)
+library(DataExplorer)
+library(wesanderson)
+library(wordcloud2)
+library(dplyr)
+library(tidyr)
+library(tidytext)
+library(lubridate)
+library(stringr)
+library(ggplot2)
+library(scales)
+library(viridis)
+library(ggtext)
+library(priceR)
+library(rvest)
+library(leaflet)
+library(rnaturalearth)
+library(rnaturalearthhires)
+
+```
+
+### Import Dataset
+
+```{r warning=FALSE, message=FALSE,show_col_types = FALSE}
+# Loading Dataset
+listings <- read_csv("Datasets/listings2019_2021.csv")
+
+```
+
+```{r warning=FALSE, message=FALSE}
+# checking the glimpse of first five rows of data in first page, click next to see the next 5 rows.
+datatable(listings[1:20,1:5], options = list(pageLength = 5))
+
+```
+
+```{r warning=FALSE, message=FALSE}
+# let's check the structure of dataset to convert the features into correct format.
+listings %>% glimpse()
+
+```
+
+Let's convert date features into datetime.
+
+```{r warning=FALSE, message=FALSE}
+
+# lets convert the column first_seen into datetime format.
+listings$first_seen <- listings$first_seen %>% as.POSIXct(format="%Y-%m-%d")
+# create new feature first_seen_year by extracting only year from the dates.
+listings$first_seen_year <- format(listings$first_seen, format="%Y")
+# Rename the column 'F.' to 'F#'
+colnames(listings)[which(colnames(listings) == "F.")] <- "F#"
+
+```
+
+If you look at the data carefully, you'll get to know that the state column contains states from UK and other so we will filter the state column first and start our analysis.
+
+```{r warning=FALSE, message=FALSE}
+listings <- listings %>% 
+  # Remove Overseas,UK and Ireland data from states
+  filter(!state %in% c("Overseas", "UK & Ireland"))
+```
+
+<b> Now Let' check any missing values in data. </b>
+
+```{r warning=FALSE, message=FALSE}
+# Let's visualize if any Missing values in data.
+plot_missing(listings,missing_only=TRUE)
+
+```
+ 
+From the above plot, we can see that there are the features which is having missing values. 
+
+<a href="#top10">Go to top:Table of Contents</a>
+
+<b> We have to clean and preprocess the relavant data to make the analysis more understandable.</b>
+
+<h2 id="top1">Exploratory Data Analysis</h2>
+
+<b> Let's start the EDA and preprocessing (if we needed) together.</b>
+
+### Analysis of Job Description
+
+The Job description is one of the most important thing when we think of any kind of job. In this dataset, two fields having the description of jobs: desktopAdTemplate and mobileAdTemplate and we have seen above both the features contains missing values.
+
+so let's create a new variable called job_description to avoid two field interruption and if we look at the data carefully. we will get to know that some words are joined together in mobileAdTemplate so only desktopAdTemplate make sense and we will continue further EDA with that variable only.
+
+```{r warning=FALSE, message=FALSE}
+# creating new column in same dataframe for further analysis
+listings <- listings %>% 
+  mutate(job_description = ifelse(nchar(desktopAdTemplate) == 0, mobileAdTemplate, desktopAdTemplate)) 
+
+```
+
+<h2 id="top6">Most Common Words in Data Science Job Ads</h2>
+
+Let's create a wordcloud to explore the text content of job descriptions:
+
+```{r warning=FALSE, message=FALSE}
+# For text analysis, its better to remove stopwords which contains irrelavant information.
+stop_words_except_languages <- stop_words %>%
+  # select word only
+  select(word) %>%
+  # filter words and exclude languages names
+  filter(!word %in% c("r", "c", "f", "d", "q")) # These five elements in vector are the name of languages.
+
+# # lets split the columns into tokens meaning one token per row
+# listing_words <- listings %>%
+#   unnest_tokens(word, job_description) %>%
+#   anti_join(stop_words_except_languages) %>%
+#   distinct()
+# 
+# # lets create wordcloud for top 100 words to get some more words in job ads.
+# listing_words %>%
+#   count(word, sort = TRUE) %>%
+#   head(100) %>%
+#   # CODE for wordcloud
+#   wordcloud2(size = .2,
+#               fontFamily ="serif",
+#               shape = 'cloud',
+#               ellipticity = 1)
+
+```
+
+<b>Unsurprisingly, some of the most common words are 'data', 'scientist','experience', 'apply','team', 'python', 'r', 'machine', and 'learning'. These results are very much as expected.</b>
+
+<a href="#top10">Go to top:Table of Contents</a> 
+
+<h2 id="top7">Which programming languages (and tools) are most in-demand for Data Scientist roles in Australia?</h2>
+
+As you know if you want to make a career in data science, you need to know the languages which are the most important to learn. so lets check the important tools and languages used by companies in australia. 
+
+
+```{r warning=FALSE, message=FALSE}
+
+listing_pivot <- listings %>% 
+  # select jobid and columns from R:fortran using slicing 
+  select(jobId, R:Fortran,first_seen_year) %>% 
+  # pivot the selected columns to change the shape of the data
+  pivot_longer(cols = R:Fortran, names_to = "languages") %>% 
+  filter(value == 1) %>% 
+  mutate(languages = factor(languages))
+
+# lets visualize the data by using barplot
+p <- ggplot(listing_pivot,aes(x =languages, fill = languages)) +geom_bar(aes(y = (..count..)/sum(..count..))) +
+  geom_text(aes(label = scales::percent(round((..count..)/sum(..count..),3)),y = (..count..)/sum(..count..) ), stat = "count", vjust = -.2,size=1.9) +
+  labs(x='Programming Languages',y='Percentage') +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L)) +
+  theme(legend.position = 'none',
+        axis.text.x = element_text(hjust = 1,vjust = 0.5,angle=90)) +
+  scale_color_viridis(discrete = TRUE , option = "D")+
+  scale_fill_viridis(discrete = TRUE)
+
+p
+
+```
+
+Represented above are the counts of job ads as they appear in the search results for each language/software.
+<ul style="list-style-type:disc;">
+<li>It is clearly seen from the above that Python, R and SQL are the top 3 programming language used in data science field.</li>
+<li>Hadoop, Scala and Spark are also very popular but in data science field, they are very popular for data engineering purposes.</li>
+</ul>
+
+<b>Let's check one more thing, Data Science Job Listings in 2020 and 2021.</b>
+
+```{r warning=FALSE, message=FALSE}
+
+lang_19_20_21 <- listing_pivot %>% 
+  # group by using first_seen_year and language- a new feature created using pivot.
+  group_by(first_seen_year,languages) %>%  
+  # count the frequency of languages by each year(2019/2020/2021) 
+  summarise(count=sum(value))
+
+# creating a year facet
+p_19_20_21 <-ggplot(data=lang_19_20_21, aes(x=reorder(languages,-count), y=count,fill = languages)) +
+  geom_bar(stat="identity") + 
+  labs(x='Programming Languages',y='Count') +
+  scale_y_continuous(breaks = seq(0,3000,200)) +
+  theme(legend.position = 'none',
+        axis.text.x = element_text(hjust = 1,vjust = 0.5,angle=90)) +
+  facet_wrap(~ first_seen_year,dir = "v")
+
+p_19_20_21
+
+```
+
+<ul style="list-style-type:disc;">
+<li>Python has almost 50% more jobs than R in 2021.</li>
+<li>We can see the growth of Tableau in 2021, it's still 4th in rank but see the changes in listings.</li>
+<li>Similarly for SAS, the number of listings more than doubled between 2020 and 2021.</li>
+</ul>
+
+<a href="#top10">Go to top:Table of Contents</a> 
+
+<h2 id="top8">What kind of salaries are Data Scientists earning in Australia?</h2>
+
+We have seen above that most of companies don't reveal the salary(62.86% data has ("")empty string values). lets get some insights from salary_string features for that we will be using priceR library. so If we talk about Australia, Full time employees are paid atleast $730 for a 40 hours per week. 
+
+```{r warning=FALSE, message=FALSE}
+
+listings <- listings$salary_string %>% 
+  extract_salary(
+    # Set to minimum Austrlian full time salary that is lower bound
+    exclude_below = 740.80  * 48,  
+    # Set some upper bound
+    exclude_above = 600000, 
+    include_periodicity = TRUE,
+     # Since a typical working year in Australia has 48 weeks
+    working_weeks_per_year = 48
+    ) %>% 
+  # column bind the listings 
+  cbind(listings, .)
+
+```
+
+This gives us two extra columns: salary and periodicity.
+Although of lot of listings didn't provide any salary information, we now have the salary for 724 of 2857 listings, so we can explore those which we have.
+According to Google, The average salary for a Data Scientist in Australia is between <b>AU$75,233 per year- AU$121,578</b> per year based on one's experience.
+
+### Salary Distribution by Job Titles
+
+```{r warning=FALSE, message=FALSE}
+
+sal_title <- listings %>% 
+  # remove the leading white spaces from jobtitle and feed into the same column
+  mutate(jobTitle = trimws(jobTitle)) %>% 
+  # group by job title
+  group_by(jobTitle) %>%
+  # for each job title count the frequency and calculate the mean of salary by removing null values from it.
+  summarise(count=n(),
+            avg_salary = round(mean(salary, na.rm = TRUE),2)) %>%
+  # filter the NAN values associated with '$' from avg_salary
+  filter(avg_salary != "$NaN") %>% 
+  # arrange the average salary in descending order.
+  arrange(desc(count)) %>% 
+  # create a dataframe
+  as.data.frame %>% 
+  # get the first 7 highest average salaries.
+  head(7)
+datatable(sal_title, options = list(pageLength = 7))
+
+```
+
+Let's visualize the above table
+
+```{r warning=FALSE, message=FALSE}
+
+ggplot(data = sal_title,aes(x=reorder(jobTitle,-avg_salary), y=avg_salary,fill= jobTitle)) +
+  geom_bar(stat="identity") + 
+  labs(title = "Salary Distribution by Job Titles",x='Job Titles',y='Average Salary') +
+  theme(legend.position = 'none',
+        axis.text.x = element_text(hjust = 1,vjust = 0.5,angle=90),
+        plot.background=element_rect(fill="darkseagreen"),
+        plot.margin = unit(c(1, 1, 1, 0.1), "cm")) +
+  geom_text(aes(label = dollar(avg_salary)), 
+            vjust=-0.2) + 
+  scale_x_discrete(breaks=c("Lead Data Scientist","Senior Data Scientist","Data Scientist",
+                              "Data Engineer","Data Analyst","Assistant Directors - Statisticians and Data Professionals","Junior Data Scientist"),
+        labels=c("Lead DS", "Senior DS", "DS","DE","DA","Statisticians","Junior DS"))
+
+```
+
+As you can see, the distribution is same as what we expected that is higher salary for Lead and Senior Data Scientist.
+
+### Salary Distribution by Language
+
+```{r warning=FALSE, message=FALSE}
+
+salaries_by_lang <- listings %>%
+  # select jobid and columns from R:fortran using slicing 
+  select(salary, R:Fortran) %>% 
+  # pivot the selected columns to change the shape of the data
+  pivot_longer(R:Fortran, names_to = "languages") %>% 
+  # filter only where language is equal to 1.
+  filter(value == 1) %>% 
+  # select language and salary only for further preprocessing
+  select(languages, salary) %>%  
+  # remove null values from salary
+  filter(!is.na(salary)) %>% 
+  # group by language
+  group_by(factor(languages)) %>%
+  summarise(avg_salary = round(mean(salary, na.rm = TRUE),2),  # Calculate Average of salary 
+            max_salary = max(salary,na.rm=TRUE), # Calculate maximum of salary for each language
+            min_salary = min(salary,na.rm=TRUE), # Calculate minimum of salary for each language
+            count = n())  # frequency count for language
+
+datatable(salaries_by_lang, options = list(pageLength = 10))
+
+```
+
+<ul style="list-style-type:disc;">
+<li>The Average Salary distribution by programming languages in Australia range from <b>$58,000 - $360,000</b>, with an <b>average of $140,510 and median of $130,000</b>.</li>
+<li>It seems Stata has highest average salary in Australia for data science.</li>
+</ul>
+
+<a href="#top10">Go to top:Table of Contents</a>
+
+<h2 id="top9">How many Data Scientist jobs were listed in australia, how did it compare to a year ago (pre COVID in Australia), and where are these jobs located?</h2>
+
+### Salary Distribution by State
+
+```{r warning=FALSE, message=FALSE}
+
+# Grab the Australian States Information
+australian_states <- rnaturalearth::ne_states(country = 'australia')
+# Scrape wikipedia Australian states and territories population datasets
+australia_pop_page_html <- read_html("https://en.wikipedia.org/wiki/States_and_territories_of_Australia") 
+
+# Extract the population page 
+pop_tables <- australia_pop_page_html %>% 
+  html_nodes("table")
+
+# Grab data from states table
+states <-  pop_tables[[3]] %>% 
+  html_table %>% 
+  select(State, 'Population(Mar 2021)[4]') %>% 
+  rename(state = State, state_pop = 'Population(Mar 2021)[4]')
+
+# Grab data from territories table
+territories <-  pop_tables[[4]] %>% 
+  html_table %>% 
+  select(Territory, 'Population(Mar 2021)[4]') %>% 
+  rename(state = Territory, state_pop = 'Population(Mar 2021)[4]')
+
+# Combine the two tables and tidy the data.frame
+aus_pop_by_state <- bind_rows(states, territories) %>% 
+  filter(state != "Jervis Bay Territory") %>% 
+  mutate(state_pop = state_pop %>% gsub(",", "", .) %>% as.integer) 
+
+ds_listings_by_state <- listings %>% 
+  # group by state
+  group_by(state) %>% 
+  # count the frequency of each state
+  summarise(count=n(),   # count the frequency of each state
+            avg_salary = round(mean(salary, na.rm = TRUE),2)) %>%  # Remove null values and Calculate Average of salary  
+  # arrange the frequency count of state in descending order
+  arrange(desc(count)) %>%  
+  mutate(state = str_replace(state, "Northern Territories", "Northern Territory")) %>%
+  # Join the group by data, state and territories data together.
+  left_join(aus_pop_by_state) %>% 
+  # create a new column for job listings per 100K.
+  mutate(job_listings_per_100k = round((count/(state_pop/100000)), 2)) 
+
+ds_state_salaries <- australian_states$name %>%
+  data.frame(name = ., stringsAsFactors = FALSE) %>%
+  left_join(., ds_listings_by_state, by = c("name"="state")) %>%
+  pull(avg_salary)
+
+custom_bins <- c(0, 80, seq(100, 160, 10)) * 1000 # seq(0, 25, 2.5) # c(0, 0.5, 1, 2, 3, seq(4, 8, 2), seq(10, 25, 5))
+
+custom_palette <- colorBin(palette = "Greens",
+                           domain = ds_state_salaries,
+                           na.color = "transparent",
+                           bins = custom_bins) 
+
+# Tooltips:
+custom_text <- paste(
+  "State: ", australian_states$name,"<br/>",
+  "Average Salary: ", round(ds_state_salaries, 2),
+  sep="") %>%
+  lapply(htmltools::HTML) 
+
+# Final Map
+ds_map <- leaflet(australian_states) %>%
+  addTiles(urlTemplate = 'http://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png') %>%
+  setView(lat = -29.15, lng = 130.25 , zoom=4) %>%
+  addPolygons(
+    fillColor = ~custom_palette(ds_state_salaries),
+    stroke = TRUE,
+    fillOpacity = 0.6,
+    color = "white",
+    weight = 0.3,
+    label = custom_text,
+    labelOptions = labelOptions(
+      style = list("font-weight" = "normal", padding = "3px 8px"),
+      textsize = "13px",
+      direction = "auto"
+    )
+  ) %>%
+  addLegend(
+    pal = custom_palette,
+    values = ~ds_state_salaries,
+    opacity=0.9,
+    title = "Average DS Salary",
+    position = "bottomleft"
+  )
+
+ds_map
+
+```
+
+Let's See Salary Distribution using Boxplot
+
+```{r warning=FALSE, message=FALSE}
+
+ggbox <- ggplot(listings,aes(state,salary,fill=state))+geom_boxplot(alpha=0.5)+
+labs(x = "States", y = "Salary")+
+scale_fill_manual(values=rainbow(n=8))+
+  ggtitle("Salary Distribution by State") + scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "right",
+        axis.text.x = element_text(hjust = 1,vjust = 0.5,angle=90))
+
+ggbox
+
+```
+
+<b>We can clearly see that geographical area is also plays important role in salaries. different state has different range of salaries.</b>
+
+### Data Science Job Listings by State
+
+```{r warning=FALSE, message=FALSE}
+
+datatable(ds_listings_by_state, options = list(pageLength = 10))
+
+```
+
+<b>Now this is interesting! ACT, has a massive 56 data scientist job listings per 100k people, more than triple NSW who has ~15 listings per 100k people!</b>
+
+### Job Listing Posted per Week
+
+```{r warning=FALSE, message=FALSE}
+
+new_jobs_per_week <- listings %>% 
+  mutate(listingDate = as.Date(listingDate)) %>% 
+  #Extract week data and apply groupby on it
+  group_by(week = floor_date(listingDate, "week")) %>%
+  summarise(count=n()) %>%  
+  ggplot(aes(week, count)) +
+  geom_col(fill = "tomato4",color="black") +
+  theme(legend.position = "none") +
+  labs(title="New Job Listings per Week") +
+  scale_x_date(date_labels = "%Y-%b",
+               date_breaks = "5 months")
+
+new_jobs_per_week
+
+```
+
+<b>This is very interesting. We see new listings around April 2020, when Australia experienced COVID-19 outbreaks, and many employers suddenly required employees work from home where possible. In the week starting April 2020, there were only few new Data Scientist job listings in the whole of Australia!
+
+But Now from April we can see the increament in the number of job postings.</b>
+
+<a href="#top10">Go to top:Table of Contents</a>
+
+<h2 id="top12">How many Data Science Related Roles offered by companies in Australia?</h2>
+
+```{r warning=FALSE, message=FALSE}
+
+listings %>% 
+  # only extracting where employers post a job (Excluding Recruiter)
+  filter(recruiter == 0) %>% 
+  group_by(companyName) %>% 
+  summarise(count=n(), 
+            companyRating = mean(companyRating, na.rm=T)) %>% 
+  arrange(desc(count)) %>% 
+  filter(companyName != "") %>%
+  head(30) %>%
+  # Next line ensures the order remains in tact
+  mutate(companyName = factor(companyName, levels = rev(unique(companyName)))) %>%
+  ggplot(aes(companyName, count)) +
+  geom_col(aes(fill = factor(companyRating)))  +
+  scale_y_continuous(breaks = seq(0,55,5)) +
+  theme(legend.position = "none") +
+  scale_color_brewer(palette="Paired") +
+  labs(title="Companies by Number of Data Scientist Job Listings",y='Count',x='Companies Name') +
+  coord_flip()  
+
+
+```
+
+<b>It looks like ABS, Capgemini, Foxtel, CSIRO  are the companies with most number of data science jobs with good rating in Australia.</b> 
+
+<a href="#top10">Go to top:Table of Contents</a> 
+
+<h1 id="top2"><u>Conclusion</u></h1> 
+
+<b>Now we have lots of interesting points about data science jobs in australia.</b>
+<ul style="list-style-type:disc;">
+<li>Python, R and SQL are the most used languages by data scientist in australia.</li>
+<li>Employees with Data Scientist in their job title in New South Wales earns higher than any other state in Australia.</li>
+<li>Australian Capital Territory has a massive 56 data scientist job listings per 100k people, more than triple New South Wales.</li>
+<li>Due to the Covid-19 pandemic and the economic slowdown, many companies went on survival mode, This resulted in a slowdown in the growth of the data science industry in 2020. When there were fewer companies hiring data scientists in the job market and according to our analysis, around first week of April 2020, when Australia experienced COVID-19 outbreaks, there were less than 10 new data scientist job listings in Australia.</li>
+</ul>
+
+<h1 id="top3"><u>References</u></h1> 
+
+<li><a href="https://www.youtube.com/watch?v=h29g21z0a68" >Plotting Anything with ggplot2- Youtube Video</a></li>
+<li><a href="https://r4ds.had.co.nz/data-visualisation.html" >Data Visualization- ggplot2</a></li>
+<li><a href="http://zevross.com/blog/2014/08/04/beautiful-plotting-in-r-a-ggplot2-cheatsheet-3/" >A Beautiful Plotting in R: A ggplot2 cheatsheet</a></li>
+<li><a href="https://rkabacoff.github.io/datavis/IntroGGPLOT.html" >Intro to ggplot2-Data Visualization with R</a></li>
+<li><a href="https://rkabacoff.github.io/datavis/Bivariate.html" >Bivariate Graphs- Data Visualization with R</a></li>
+
+<a href="#top10">Go to top:Table of Contents</a> 
+
+<h1 style="color:brown; font-size:50px;"><center>Thank you!</center></h1> 
